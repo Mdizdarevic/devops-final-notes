@@ -438,7 +438,7 @@ podman image prune
 
 ### 18. Write a Containerfile for a static file server using python -m http.server over a directory you COPY in, expose the port, and run it
 mkdir public
-echo "<h1>Hello world</h1>" > public/index.html
+echo "<p>Hello world</p>" > public/index.html
 FROM registry.access.redhat.com/ubi9/ubi-minimal:9.5
 RUN microdnf install -y python3 && microdnf clean all
 WORKDIR /app
@@ -477,3 +477,450 @@ Image mirroring is useful to avoid registry rate limits
 podman run -d --rm my-image -l
 Minimal base images are more secure because they strip out explotiable binaries
 
+## LO3
+### 1. Create a pod with podman pod create (publishing a port), add an app container and a database container to it, and show they reach each other over localhost (shared network namespace).
+podman pod create --name my-pod -p 8080:8080
+podman run -d --name my-db \
+  --pod multi-tier-pod \
+  -e POSTGRES_USER=admin \
+  -e POSTGRES_PASSWORD=secret \
+  -e POSTGRES_DB=app_db \
+  registry.access.redhat.com/ubi9/postgresql-15:latest
+podman run -d --name my-app \
+  --pod multi-tier-pod \
+  registry.access.redhat.com/ubi9/ubi-minimal:9.5 \
+  /bin/sh -c "while true; do sleep 30; done"
+podman exec -it my-app microdnf install -y nc
+podman exec -it my-app nc -zv localhost 5432
+
+### 2. Create a user-defined network, run an app container and a postgres container on it, and prove the app resolves the database by container name (podman DNS on custom networks).
+podman network create my-net
+podman run -d --name my-postgres \
+  --network app-net \
+  -e POSTGRES_USER=admin \
+  -e POSTGRES_PASSWORD=secret \
+  -e POSTGRES_DB=test_db \
+  registry.access.redhat.com/ubi9/postgresql-15:latest
+
+podman run -d --name my-app \
+  --network app-net \
+  registry.access.redhat.com/ubi9/ubi-minimal:9.5 \
+  /bin/sh -c "while true; do sleep 30; done"
+podman exec -it my-app getent hosts my-postgres
+
+### 3. Deploy a two-tier stack of your choice that is not Drupal/Joomla/WordPress (e.g. Ghost + MySQL, Gitea + PostgreSQL, or Redmine + PostgreSQL) and complete its first-run setup
+podman network create gitea-net
+podman run -d --name gitea-db \
+  --network gitea-net \
+  -e POSTGRES_USER=gitea \
+  -e POSTGRES_PASSWORD=secret_db_pass \
+  -e POSTGRES_DB=gitea \
+  -v gitea-db-data:/var/lib/postgresql/data:Z \
+  docker.io/library/postgres:16-alpine
+podman run -d --name gitea-app \
+  --network gitea-net \
+  -p 3000:3000 \
+  -p 2222:22 \
+  -v gitea-app-data:/data:Z \
+  docker.io/gitea/gitea:1.22-alpine
+
+### 4. Persist the database's data in a named volume so it survives podman rm + re-creation of the DB container; prove the data is still there afterward.
+podman volume create pg-data
+podman run -d --name test-db \
+  -v pg-data:/var/lib/postgresql/data:Z \
+  -e POSTGRES_USER=admin \
+  -e POSTGRES_PASSWORD=secret \
+  -e POSTGRES_DB=mydb \
+  docker.io/library/postgres:16-alpine
+podman exec -it test-db psql -U admin -d mydb -c "CREATE TABLE users (id SERIAL, name TEXT); INSERT INTO users (name) VALUES ('Moreno');"
+podman rm -f test-db
+podman run -d --name test-db \
+  -v pg-data:/var/lib/postgresql/data:Z \
+  -e POSTGRES_USER=admin \
+  -e POSTGRES_PASSWORD=secret \
+  -e POSTGRES_DB=mydb \
+  docker.io/library/postgres:16-alpine
+podman exec -it test-db psql -U admin -d mydb -c "SELECT * FROM users;"
+
+### 5. Use a podman secret (podman secret create + --secret) to pass the database password instead of --env; explain the security benefit.
+echo "password123" | podman secret create db_pass -
+podman run -d --name secure-db \
+  --secret db_pass,type=env,target=POSTGRES_PASSWORD \
+  -e POSTGRES_USER=admin \
+  -e POSTGRES_DB=secure_prod \
+  docker.io/library/postgres:16-alpine
+
+### 6. Write a podman compose file (compose.yaml) for an app + database, bring it up with podman compose up -d, and show both services running
+services:
+- db:
+    - image: docker.io/library/postgres:16-alpine
+    - container_name: compose-db
+    - environment:
+      - POSTGRES_USER: app_user
+      - POSTGRES_PASSWORD: secure_password
+      - POSTGRES_DB: app_production
+    - volumes:
+      - db_data:/var/lib/postgresql/data:Z
+    networks:
+      - app-tier
+
+- web:
+    - image: registry.access.redhat.com/ubi9/ubi-minimal:9.5
+    - container_name: compose-web
+    - command: /bin/sh -c "while true; do sleep 30; done"
+    - ports:
+      - "8080:8080"
+    - networks:
+      - app-tier
+    - depends_on:
+      - db
+
+volumes:
+  - db_data:
+
+networks:
+  - app-tier:
+
+podman compose up -d
+podman compose ps
+
+### 7. In that compose file, keep the database on an internal network with no published port and expose only the app; prove the DB isn't reachable from the host.
+services:
+- db:
+    - image: docker.io/library/postgres:16-alpine
+    - container_name: compose-db
+    - environment:
+      - POSTGRES_USER: app_user
+      - POSTGRES_PASSWORD: secure_password
+      - POSTGRES_DB: app_production
+    - volumes:
+      - db_data:/var/lib/postgresql/data:Z
+    networks:
+      - backend-tier
+
+- web:
+    - image: registry.access.redhat.com/ubi9/ubi-minimal:9.5
+    - container_name: compose-web
+    - command: /bin/sh -c "while true; do sleep 30; done"
+    - ports:
+      - "8080:8080"
+    - networks:
+      - backend-tier
+      - frontend-tier
+    - depends_on:
+      - db
+
+volumes:
+  - db_data:
+
+networks:
+  - frontend-tier:
+  - backend-tier:
+    - internal: true
+
+podman compose up -d
+
+### 8. Add a compose healthcheck plus depends_on: condition: service_healthy so the app waits for the database; demonstrate the startup ordering.
+services:
+- db:
+    - image: docker.io/library/postgres:16-alpine
+    - container_name: compose-db
+    - environment:
+      - POSTGRES_USER: app_user
+      - POSTGRES_PASSWORD: secure_password
+      - POSTGRES_DB: app_production
+    - volumes:
+      - db_data:/var/lib/postgresql/data:Z
+    networks:
+      - app-tier
+    healthcheck:
+      - test: ["CMD-SHELL", "pg_isready -U app_user -d app_production"]
+      - interval: 3s
+      - timeout: 3s
+      - retries: 5
+      - start_period: 2s
+
+- web:
+    - image: registry.access.redhat.com/ubi9/ubi-minimal:9.5
+    - container_name: compose-web
+    - command: /bin/sh -c "while true; do sleep 30; done"
+    - ports:
+      - "8080:8080"
+    - networks:
+      - backend-tier
+      - frontend-tier
+    - depends_on:
+      - db:
+        - condition: service_healthy
+
+volumes:
+  - db_data:
+
+networks:
+  - app-tier
+
+podman compose up -d
+
+### 9. Use an env_file: in compose for the database credentials instead of inline values.
+cat << EOF > .env.db
+POSTGRES_USER=app_user
+POSTGRES_PASSWORD=super_secure_password_123
+POSTGRES_DB=app_production
+EOF
+services:
+- db:
+    - image: docker.io/library/postgres:16-alpine
+    - container_name: compose-db
+    - envi_file:
+      - .env.db
+    - volumes:
+      - db_data:/var/lib/postgresql/data:Z
+    networks:
+      - app-tier
+
+- web:
+    - image: registry.access.redhat.com/ubi9/ubi-minimal:9.5
+    - container_name: compose-web
+    - command: /bin/sh -c "while true; do sleep 30; done"
+    - ports:
+      - "8080:8080"
+    - networks:
+      - app-tier
+    - depends_on:
+      - db
+
+volumes:
+  - db_data:
+
+networks:
+  - app-tier:
+
+podman compose up -d
+
+### 10. Scale one compose service to multiple replicas (podman compose up --scale app=3) and explain how requests are distributed
+podman compose up -d --scale web=3
+podman compose ps
+Requests are distributed thru podman's internal dns, which mapps service name to ip addresses
+
+### 11. Mount a bind mount for app configuration and a named volume for data in the same container, and explain why you'd use each.
+mkdir -p ./config
+echo "max_connections = 50" > ./config/custom.conf
+podman volume create db-storage
+podman run -d --name mixed-storage-db \
+  -v ./config/custom.conf:/etc/postgresql/postgresql.conf:Z \
+  -v db-storage:/var/lib/postgresql/data:Z \
+  -e POSTGRES_PASSWORD=secret \
+  docker.io/library/postgres:16-alpine
+
+### 12. Back up a named volume to a tarball using a helper alpine/busybox container that mounts the volume, then restore it into a fresh volume.
+podman run --rm \
+  -v db-storage:/volume-data:ro \
+  -v ./backup:/backup-dir:Z \
+  docker.io/library/busybox \
+  tar -czf /backup-dir/db_backup.tar.gz -C /volume-data .
+podman volume create db-storage-restored
+podman run --rm \
+  -v db-storage-restored:/volume-data:Z \
+  -v ./backup:/backup-dir:ro \
+  docker.io/library/busybox \
+  tar -xzf /backup-dir/db_backup.tar.gz -C /volume-data
+
+### 13. Put an nginx reverse-proxy container in front of an app container on a shared network and route host traffic through nginx to the app.
+podman network create proxy-net
+podman run -d --name my-app-service \
+  --network proxy-net \
+  registry.access.redhat.com/ubi9/ubi-minimal:9.5 \
+  /bin/sh -c "echo 'Hello from behind the proxy!' > index.html; exec python3 -m http.server 8080"
+mkdir -p ./nginx-conf
+cat << 'EOF' > ./nginx-conf/default.conf
+server {
+    listen 80;
+    server_name localhost;
+
+    location / {
+        proxy_pass http://my-app-service:8080;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+}
+EOF
+podman run -d --name nginx-proxy \
+  --network proxy-net \
+  -p 8080:80 \
+  -v ./nginx-conf/default.conf:/etc/nginx/conf.d/default.conf:Z \
+  docker.io/library/nginx:alpine
+
+### 14. Add a database-admin container (e.g. adminer or pgadmin) to the network and use it to inspect the database
+podman run -d --name db-adminer \
+  --network proxy-net \
+  -p 8082:8080 \
+  docker.io/library/adminer:latest
+
+### 15. Generate Kubernetes YAML from a running pod with podman generate kube 
+podman generate kube multi-tier-pod > multi-tier-pod.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  - creationTimestamp: "2026-06-23T18:30:00Z"
+  - labels:
+    - app: multi-tier-pod
+  - name: multi-tier-pod
+spec:
+  - containers:
+    - env:
+        - name: POSTGRES_USER
+        - value: admin
+        - name: POSTGRES_PASSWORD
+        - value: secret
+        - name: POSTGRES_DB
+        - value: app_db
+    - image: registry.access.redhat.com/ubi9/postgresql-15:latest
+    - name: my-db
+    - resources: {}
+  - argument:
+    - /bin/sh
+    - -c
+    - while true; do sleep 30; done
+    - image: registry.access.redhat.com/ubi9/ubi-minimal:9.5
+    - name: my-app
+    - resources: {}
+- ports:
+  - containerPort: 8080
+    hostPort: 8080
+    protocol: TCP
+
+### 16. Run a pod from a Kubernetes YAML with podman kube play, then tear it down with podman kube play --down.
+podman kube play multi-tier-pod.yaml
+podman pod ps
+podman kube play multi-tier-pod.yaml --down
+
+### 17. Set per-service CPU/memory limits in a compose file and verify them with podman stats.
+services:
+  - db:
+    - image: docker.io/library/postgres:16-alpine
+    - container_name: compose-db
+    - environment:
+      - POSTGRES_USER: app_user
+      - POSTGRES_PASSWORD: secure_password
+      - POSTGRES_DB: app_production
+    - volumes:
+      - db_data:/var/lib/postgresql/data:Z
+    - networks:
+      - app-tier
+    - deploy:
+      - resources:
+        - limits:
+          - cpus: '0.50'
+          - memory: 256M
+
+  - web:
+    - image: registry.access.redhat.com/ubi9/ubi-minimal:9.5
+    - container_name: compose-web
+    - command: /bin/sh -c "while true; do sleep 30; done"
+    - ports:
+      - "8080:8080"
+    - networks:
+      - app-tier
+    - deploy:
+      - resources:
+        - limits:
+          - cpus: '0.25'
+          - memory: 128M
+    - depends_on:
+      - db
+
+volumes:
+  - db_data:
+
+networks:
+  - app-tier:
+
+podman compose up -d
+podman stats 
+
+### 18. Inspect a pod with podman pod inspect and show which Linux namespaces the containers share (network, IPC) and which they don't (PID by default).
+podman pod inspect multi-tier-pod
+
+### 19. Demonstrate name-based discovery failing when two containers are on different networks, then fix it by attaching them to a common network
+podman network create net-backend
+podman network create net-frontend
+podman run -d --name isolated-db \
+  --network net-backend \
+  -e POSTGRES_PASSWORD=secret \
+  docker.io/library/postgres:16-alpine
+podman run -d --name isolated-app \
+  --network net-frontend \
+  registry.access.redhat.com/ubi9/ubi-minimal:9.5 \
+  /bin/sh -c "while true; do sleep 30; done"
+podman exec -it isolated-app ping isolated-db
+podman network connect net-backend isolated-app
+
+### 20. Attach a single container to two networks (a frontend and a backend) and explain the segmentation benefit.
+podman network create net-public
+podman network create net-private
+podman run -d --name secure-database \
+  --network net-private \
+  -e POSTGRES_PASSWORD=supersecret \
+  docker.io/library/postgres:16-alpine
+podman run -d --name api-gateway \
+  --network net-public \
+  -p 8080:8080 \
+  registry.access.redhat.com/ubi9/ubi-minimal:9.5 \
+  /bin/sh -c "while true; do sleep 30; done"
+podman network connect net-private api-gateway
+
+### 21. Use podman compose logs and podman compose ps to observe and troubleshoot a multi-service stack.
+services:
+  - db:
+    - image: docker.io/library/postgres:16-alpine
+    - container_name: compose-db
+    - environment:
+      - POSTGRES_USER: app_user
+      - POSTGRES_PASSWORD: secure_password
+      - POSTGRES_DB: app_production
+    - networks:
+      - app-tier
+
+  - web:
+    - image: docker.io/library/postgres:16-alpine
+    - container_name: compose-web
+    - command: ["pg_isready", "-h", "wrong_database_host"]
+    - networks:
+      - app-tier
+    - depends_on:
+      - db
+
+networks:
+  - app-tier:
+podman compose up -d
+podman compose ps
+podman compose logs web
+
+### 22. Share configuration across two replicas of the same app via a shared named volume, and explain a risk of shared read-write storage.
+services:
+  - web-a:
+    - image: registry.access.redhat.com/ubi9/ubi-minimal:9.5
+    - container_name: compose-web-a
+    - command: /bin/sh -c "echo 'Shared Setting' > /app/config/settings.txt; while true; do sleep 30; done"
+    - volumes:
+      - shared-config:/app/config:Z
+
+  - web-b:
+    - image: registry.access.redhat.com/ubi9/ubi-minimal:9.5
+    - container_name: compose-web-b
+    - command: /bin/sh -c "sleep 5; cat /app/config/settings.txt; while true; do sleep 30; done"
+    - volumes:
+      - shared-config:/app/config:Z
+    - depends_on:
+      - web-a
+
+volumes:
+  - shared-config:
+
+podman compose up -d
+podman compose logs web-b
+
+### 23. Tear down a stack with podman compose down, then explain what happens to named volumes and how --volumes changes that.
+podman compose down
+podman compose down --volumes
+podman compose down preserves named volumes so application data survives the teardown. Appending the --volumes flag overrides this safety feature, permanently deleting the volumes and all the stored data from the host.
