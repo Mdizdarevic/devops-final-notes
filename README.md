@@ -134,32 +134,32 @@ podman volume export VOLUME_NAME --output ARCHIVE_NAME
 name: my-app-stack
 
 services:
-  web-service:
-    container_name: frontend-web
-    image: docker.io/library/httpd:latest
-    ports:
+  - web-service:
+    - container_name: frontend-web
+    - image: docker.io/library/httpd:latest
+    - ports:
       - "8080:80"
-    networks:
+    - networks:
       - app-net
-    environment:
-      ENV_MODE: production
+    - environment:
+      - ENV_MODE: production
 
-  db-service:
-    container_name: backend-db
-    image: registry.access.redhat.com/rhel9/postgresql-13:1
-    environment:
-      POSTGRESQL_USER: admin
-      POSTGRESQL_PASSWORD: redhat
-    volumes:
+  - db-service:
+    - container_name: backend-db
+    - image: registry.access.redhat.com/rhel9/postgresql-13:1
+    - environment:
+      - POSTGRESQL_USER: admin
+      - POSTGRESQL_PASSWORD: redhat
+    - volumes:
       - db-data:/var/lib/pgsql/data:Z
-    networks:
+    - networks:
       - app-net
 
 volumes:
-  db-data: {}
+  - db-data: {}
 
 networks:
-  app-net: {}
+  - app-net: {}
 
 ### Execute compose file
 podman-compose up
