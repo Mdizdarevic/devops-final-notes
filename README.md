@@ -1,13 +1,13 @@
-_ - shift + /
-/ - shift + option + 1
-: - shift + .
-"-" - /
-= - shift + 0
-@ - control + 2
-{ - option + shift + { (š)
-} - option + shift + } (đ)
-[ - option + { (š)
-] - option + } (đ)
+_ - shift + / <br>
+/ - shift + option + 1 <br>
+: - shift + . <br>
+"-" - / <br>
+= - shift + 0 <br>
+@ - control + 2 <br>
+{ - option + shift + { (š) <br>
+} - option + shift + } (đ) <br>
+[ - option + { (š) <br>
+] - option + } (đ) <br>
 
 ### Log in to a secure container image registry:
 podman login registry.redhat.io
