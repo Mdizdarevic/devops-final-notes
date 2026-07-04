@@ -926,7 +926,7 @@ FIX/WHY The pod references a ConfigMap key that doesn't exist. Add the key to th
 ### Q: A pod can't mount a Secret that lives in a different namespace. Explain namespace scoping and fix it.
 DO / FIX
 # copy the secret into the pod's namespace:
-kubectl get secret <s> -n <src-ns> -o yaml \
+kubectl get secret -n <src-ns> -o yaml \
  | sed 's/namespace: <src-ns>/namespace: <pod-ns>/' \
  | kubectl apply -n <pod-ns> -f -
 WHY Secrets are namespace-scoped; a pod can only reference Secrets in its own namespace. There's no cross-namespace mount — the Secret must exist alongside the pod.
