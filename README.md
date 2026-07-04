@@ -1,4 +1,13 @@
-# intro-to-devops-final-notes
+_ - shift + /
+/ - shift + option + 1
+: - shift + .
+"-" - /
+= - shift + 0
+@ - control + 2
+{ - option + shift + { (š)
+} - option + shift + } (đ)
+[ - option + { (š)
+] - option + } (đ)
 
 ### Log in to a secure container image registry:
 podman login registry.redhat.io
