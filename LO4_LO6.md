@@ -914,7 +914,7 @@ WHY Finalizers block deletion until their controller completes cleanup; the grac
 ### Q: Wrong apiVersion/kind pairing (e.g. apps/v1 + Pod) — explain the validation error and correct it.
 DO
 kubectl apply -f bad.yaml
-# error: no matches for kind "Pod" in version "apps/v1"
+### error: no matches for kind "Pod" in version "apps/v1"
 FIX/WHY A Pod is `apiVersion: v1`; Deployment/ReplicaSet/StatefulSet/DaemonSet are `apps/v1`. Match the kind to its correct API group/version.
 
 ### Q: A pod fails with CreateContainerConfigError because a configMapKeyRef key is missing. Diagnose and fix.
