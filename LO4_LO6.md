@@ -315,7 +315,6 @@ spec:
  clusterIP: None
  selector: {app: redis-pvc}
  ports: [{port: 6379}]
----
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -737,7 +736,7 @@ FROM ubuntu:24.04
 EXPOSE 8080
 CMD ["python3", "-m", "http.server", "8080"]
 podman run -d -p 8080:8080 <image> # now answers
-# (alternatively keep 3000 and map -p 8080:3000)
+### (alternatively keep 3000 and map -p 8080:3000)
 WHY The server listens on 3000 but you published 8080→8080, so nothing is behind 8080.
 `EXPOSE` is documentation/metadata only — it does not publish or open any port; `-p` does the
 actual publishing, and the app must listen on the targeted container port.
@@ -788,7 +787,7 @@ toleration; `unbound PersistentVolumeClaim` → create the PVC.
 ### Q: Remove a couple of spaces from a deployment and try to deploy it. Identify the cause in the error messages and fix it.
 DO
 kubectl apply -f broken.yaml
-# error: did not find expected key / mapping values are not allowed in this context
+### error: did not find expected key / mapping values are not allowed in this context
 kubectl apply -f broken.yaml --dry-run=client # validate without applying
 FIX/WHY YAML is indentation-sensitive; a misplaced space breaks the mapping structure. Restore
 consistent 2-space indentation under the right parent key, then re-apply.
@@ -833,8 +832,8 @@ Ready). Align the selector with the pod labels (or fix the labels).
 ### Q: spec.selector.matchLabels doesn't match spec.template.metadata.labels — explain the error and fix it.
 DO
 kubectl apply -f bad.yaml
-# error: Deployment.apps "x" is invalid: spec.template.metadata.labels: Invalid value ...
-# `selector` does not match template `labels`
+### error: Deployment.apps "x" is invalid: spec.template.metadata.labels: Invalid value ...
+### `selector` does not match template `labels`
 FIX/WHY A Deployment's `selector.matchLabels` must be a subset of the pod template labels.
 Make `template.metadata.labels` include every key/value in the selector.
 
@@ -925,7 +924,7 @@ FIX/WHY The pod references a ConfigMap key that doesn't exist. Add the key to th
 
 ### Q: A pod can't mount a Secret that lives in a different namespace. Explain namespace scoping and fix it.
 DO / FIX
-# copy the secret into the pod's namespace:
+### copy the secret into the pod's namespace:
 kubectl get secret -n <src-ns> -o yaml \
  | sed 's/namespace: <src-ns>/namespace: <pod-ns>/' \
  | kubectl apply -n <pod-ns> -f -
@@ -942,7 +941,7 @@ FIX/WHY The new ReplicaSet didn't become available within `progressDeadlineSecon
 ###  Q: Catch indentation/field typos before applying with --dry-run=server / --validate=true, then fix them.
 DO
 kubectl apply -f f.yaml --dry-run=server
-# e.g. error: unknown field "spec.template.spec.containers[0].imagePullpolicy"
+### e.g. error: unknown field "spec.template.spec.containers[0].imagePullpolicy"
 FIX/WHY Server-side dry-run validates against the real schema and catches typos like `imagePullpolicy` (correct: imagePullPolicy) and misnested fields before anything is applied. Correct the field name/nesting and re-apply.
 
 ### Q: An app can't reach its database Service. Verify in order and identify the broken link.
