@@ -694,7 +694,7 @@ network enables name-based resolution between attached containers
 ### Q: podman run -d --name web -v ./html:/usr/share/nginx/html docker.io/library/nginx (files aren't visible / SELinux denies access — what mount flag is missing?)
 FIX
 podman run -d --name web -v ./html:/usr/share/nginx/html:Z docker.io/library/nginx
-# (use an absolute path if a relative one isn't resolved)
+### (use an absolute path if a relative one isn't resolved)
 WHY On SELinux hosts the bind mount needs a relabel flag: `:Z` (private label for this container) or
 `:z` (shared). Without it SELinux blocks the container from reading the host files.
 
